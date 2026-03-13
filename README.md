@@ -9,7 +9,9 @@ Production-ready EMA Pullback strategy for **XAUTUSDT** futures. Deployable to R
 
 ## Strategy Description
 
-**EMA Pullback** is a trend-following strategy that enters when price temporarily retraces toward the Exponential Moving Average (EMA) and then resumes in the trend direction. On the 5-minute chart, we use a 21-period EMA as the trend reference. When price is in an uptrend (above EMA) and pulls back into a narrow "tap zone" (0.2% above the EMA), we go long. The opposite applies for shorts when price is below the EMA. RSI filters confirm momentum (RSI > 50 for longs, RSI < 50 for shorts). Stop loss is placed 0.5% beyond the EMA; take profit targets 2× the risk. Position size risks 1% of equity per trade.
+Trades pullbacks to the 21 EMA in trending gold-backed token markets. Catches momentum continuation moves after brief retracements.
+
+On the 5-minute chart, we use a 21-period EMA as the trend reference. When price is in an uptrend (above EMA) and pulls back into a narrow "tap zone" (0.2% above the EMA), we go long. The opposite applies for shorts when price is below the EMA. RSI filters confirm momentum (RSI > 50 for longs, RSI < 50 for shorts). Stop loss is placed 0.5% beyond the EMA; take profit targets 2× the risk. Position size risks 1% of equity per trade.
 
 ---
 
