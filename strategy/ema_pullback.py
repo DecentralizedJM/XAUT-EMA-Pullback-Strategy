@@ -1,5 +1,5 @@
 """
-XAUT EMA Pullback Strategy - Same logic as PAXG version.
+XAUT EMA Pullback Strategy.
 Uses Bybit klines for data, Mudrex for execution.
 """
 
