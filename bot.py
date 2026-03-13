@@ -5,6 +5,7 @@ Deployable to Railway.
 """
 
 import logging
+import math
 import os
 import sys
 import time
@@ -40,6 +41,47 @@ def round_quantity(qty: float, step: float) -> float:
         return max(0.0, qty)
     n = round(qty / step)
     return max(step, n * step) if n > 0 else 0.0
+
+
+def compute_position_and_leverage(
+    signal,
+    equity: float,
+    qty_step: float,
+    min_order_value: float,
+    max_leverage: int,
+    risk_pct: float,
+) -> tuple[float, int]:
+    """
+    Autoscale position size and leverage for low balances.
+    Ensures: notional >= min_order_value, margin <= equity, leverage capped.
+    Returns (quantity, leverage).
+    """
+    entry = signal.entry_price
+    risk_per_unit = abs(signal.entry_price - signal.stop_loss)
+    if risk_per_unit <= 0:
+        return 0.0, 1
+
+    risk_amount = equity * (risk_pct / 100)
+    qty = risk_amount / risk_per_unit
+    notional = qty * entry
+
+    # Bump position to meet minimum order value
+    if notional < min_order_value:
+        qty = min_order_value / entry
+        notional = qty * entry
+
+    qty = round_quantity(qty, qty_step)
+    if qty <= 0:
+        return 0.0, 1
+
+    notional = qty * entry
+    if equity <= 0:
+        return qty, 1
+
+    # Leverage needed: margin = notional/leverage <= equity => leverage >= notional/equity
+    min_lev = notional / equity
+    leverage = max(1, min(max_leverage, math.ceil(min_lev)))
+    return qty, leverage
 
 
 def get_current_position(positions: list, symbol: str) -> Optional[str]:
@@ -89,8 +131,9 @@ def run(config: Config, paper: bool = False) -> None:
 
     if not paper:
         try:
-            client.set_leverage(symbol, leverage, config.mudrex.margin_type)
-            logger.info("Leverage set to %dx", leverage)
+            lev_to_set = config.mudrex.max_leverage if config.mudrex.auto_leverage else leverage
+            client.set_leverage(symbol, lev_to_set, config.mudrex.margin_type)
+            logger.info("Leverage set to %dx (auto=%s)", lev_to_set, config.mudrex.auto_leverage)
         except MudrexAPIError as e:
             logger.warning("Leverage set failed (may already be set): %s", e)
 

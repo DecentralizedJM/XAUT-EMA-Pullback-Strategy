@@ -225,6 +225,16 @@ XAUT-EMA-Pullback-Strategy/
 | `use_rsi_filter` | true | RSI > 50 long, RSI < 50 short |
 | `first_tap_only` | true | Only first pullback after trend flip |
 
+### Low-Balance Support (autoscale leverage)
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `auto_leverage` | true | Scale leverage from balance to meet min order |
+| `min_order_value` | 5.0 | Minimum notional ($) per trade |
+| `max_leverage` | 50 | Cap leverage |
+
+With `auto_leverage`, the bot computes leverage so that margin stays within balance and notional meets `min_order_value`. Supports balances of $5 or less.
+
 ---
 
 ## Setup
