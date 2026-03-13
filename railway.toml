@@ -1,0 +1,11 @@
+# Railway config - XAUT EMA Pullback
+# Deploy: Mudrex execution, Bybit prices
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "python bot.py"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
