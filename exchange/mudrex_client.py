@@ -2,12 +2,20 @@
 Mudrex Futures API client for XAUT EMA Pullback strategy.
 Uses mudrex-trading-sdk (https://github.com/DecentralizedJM/mudrex-api-trading-python-sdk).
 API docs: https://docs.trade.mudrex.com/docs/overview
+Rate limit: 2 req/s. Bot spaces calls (e.g. 0.6s between balance and positions).
+Retries on transient errors (502, 503, 504).
 
 Resolves XAUTUSDT via paginated list_all() and uses asset_id for API calls when needed.
 """
 
 import logging
+import time
 from typing import Any, Optional
+
+# Transient server errors: retry after a short wait
+RETRY_STATUSES = (502, 503, 504)
+RETRY_WAIT = 5
+RETRY_ATTEMPTS = 2
 
 from mudrex import MudrexClient as _MudrexClient
 from mudrex.exceptions import MudrexAPIError as _MudrexAPIError
@@ -70,13 +78,24 @@ class MudrexClient:
         return None
 
     def get_futures_balance(self) -> float:
-        """Get USDT balance in futures wallet."""
-        try:
-            balance = self._client.wallet.get_futures_balance()
-            val = float(getattr(balance, "balance", 0) or getattr(balance, "available", 0) or 0)
-            return val
-        except Exception as e:
-            raise _wrap_sdk_error(e)
+        """Get USDT balance in futures wallet. Retries on 502/503/504."""
+        last_err = None
+        for attempt in range(RETRY_ATTEMPTS + 1):
+            try:
+                balance = self._client.wallet.get_futures_balance()
+                val = float(getattr(balance, "balance", 0) or getattr(balance, "available", 0) or 0)
+                return val
+            except Exception as e:
+                last_err = e
+                status = getattr(e, "status_code", None)
+                msg = str(e).lower()
+                is_transient = status in RETRY_STATUSES or "502" in msg or "503" in msg or "504" in msg or "bad gateway" in msg
+                if is_transient and attempt < RETRY_ATTEMPTS:
+                    logger.warning("Mudrex transient error (attempt %d/%d), retrying in %ds", attempt + 1, RETRY_ATTEMPTS + 1, RETRY_WAIT)
+                    time.sleep(RETRY_WAIT)
+                    continue
+                raise _wrap_sdk_error(e)
+        raise _wrap_sdk_error(last_err)
 
     def set_leverage(
         self,

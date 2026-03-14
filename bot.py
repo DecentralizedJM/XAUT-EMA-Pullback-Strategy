@@ -126,24 +126,26 @@ def run(config: Config, paper: bool = False) -> None:
     min_order_value = config.mudrex.min_order_value
     max_leverage = config.mudrex.max_leverage
 
+    # Rate limits: Mudrex 2 req/s; Bybit 600/5s per IP (we do 1 kline/cycle)
+    MUDREX_SPACING = 0.6  # seconds between Mudrex calls
+    POLL_INTERVAL = 90  # seconds between loop cycles (Bybit + Mudrex friendly)
+
     logger.info(
-        "XAUT EMA Pullback | Symbol=%s | MaxLev=%dx | MinOrder=$%.0f | Data=Bybit | Mode=%s",
-        symbol, max_leverage, min_order_value, "PAPER" if paper else "LIVE",
+        "XAUT EMA Pullback | Symbol=%s | Leverage=%dx (fixed) | MinOrder=$%.0f | Data=Bybit | Mode=%s",
+        symbol, leverage, min_order_value, "PAPER" if paper else "LIVE",
     )
 
     if not paper:
         try:
-            # Pre-resolve asset_id once (avoids list_all in loop); respects 2 req/s
             client._resolve_asset(symbol)
-            time.sleep(1)
-            lev_to_set = max_leverage if config.mudrex.auto_leverage else leverage
-            client.set_leverage(symbol, lev_to_set, config.mudrex.margin_type)
-            logger.info("Leverage set to %dx (auto=%s)", lev_to_set, config.mudrex.auto_leverage)
-            time.sleep(2)  # Let rate limit window recover before loop
+            time.sleep(1)  # Mudrex 2 req/s
+            client.set_leverage(symbol, leverage, config.mudrex.margin_type)
+            logger.info("Leverage set to %dx (fixed)", leverage)
+            time.sleep(2)  # Mudrex rate limit recovery before loop
         except MudrexAPIError as e:
             logger.warning("Leverage set failed (may already be set): %s", e)
 
-    poll_interval = 60  # 5m bars -> check every minute
+    poll_interval = POLL_INTERVAL
     last_bar_count = 0
 
     while True:
@@ -160,16 +162,17 @@ def run(config: Config, paper: bool = False) -> None:
                 except Exception as e:
                     logger.warning("Balance fetch failed: %s; using initial_equity", e)
                     equity = initial_equity
-                time.sleep(0.6)  # Stay under Mudrex 2 req/s before next call
+                time.sleep(MUDREX_SPACING)  # Mudrex 2 req/s
 
-            # Fetch Bybit klines
+            # Fetch Bybit klines (retries on rate limit inside fetch_klines)
             df = fetch_klines_dataframe(symbol, interval="5", limit=200)
             if len(df) < 60:
                 logger.warning("Insufficient kline data: %d bars", len(df))
                 time.sleep(poll_interval)
                 continue
 
-            # Current position (spaced after balance for 2 req/s)
+            if not paper:
+                time.sleep(MUDREX_SPACING)  # Mudrex 2 req/s before positions
             positions = client.get_open_positions(symbol) if not paper else []
             position = get_current_position(positions, symbol)
 
@@ -185,6 +188,8 @@ def run(config: Config, paper: bool = False) -> None:
                     max_leverage,
                     config.strategy.risk_per_trade_pct,
                 )
+                if not config.mudrex.auto_leverage:
+                    lev = leverage  # Fixed 25x
                 if qty < qty_step:
                     logger.warning("Position size %.6f below min step, skipping", qty)
                 else:

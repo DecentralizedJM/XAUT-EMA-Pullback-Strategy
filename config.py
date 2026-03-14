@@ -26,14 +26,13 @@ class StrategyConfig:
 @dataclass
 class MudrexConfig:
     api_secret: str = ""
-    leverage: int = 5
+    leverage: int = 25  # Fixed 25x
     margin_type: str = "ISOLATED"
     quantity_step: float = 0.001  # XAUT min step
     initial_equity: float = 10000.0  # Fallback if balance fetch fails
-    # Low-balance support: autoscale leverage to meet min order
-    min_order_value: float = 8.0  # Minimum notional (e.g. $8)
-    max_leverage: int = 25  # Cap leverage
-    auto_leverage: bool = True  # When True, scale leverage from balance
+    min_order_value: float = 8.0  # Minimum notional $8
+    max_leverage: int = 25
+    auto_leverage: bool = False  # False = fixed 25x
 
 
 @dataclass

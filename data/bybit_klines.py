@@ -1,8 +1,10 @@
 """
 Bybit kline data for XAUT strategy.
 Uses Bybit public REST API - no auth required.
+Rate limit: 600 req / 5s per IP (public). Retries on 10006 with backoff.
 """
 
+import logging
 import time
 from datetime import datetime, timedelta
 from typing import Optional
@@ -10,7 +12,11 @@ from typing import Optional
 import pandas as pd
 import requests
 
+logger = logging.getLogger(__name__)
+
 BYBIT_KLINE_URL = "https://api.bybit.com/v5/market/kline"
+BYBIT_RATE_LIMIT_CODE = 10006  # Too many visits
+BYBIT_RATE_LIMIT_WAIT = 65  # seconds to wait on rate limit (5s window + buffer)
 
 
 def fetch_klines(
@@ -18,8 +24,9 @@ def fetch_klines(
     interval: str = "5",
     limit: int = 200,
     end_ms: Optional[int] = None,
+    max_retries: int = 3,
 ) -> list:
-    """Fetch klines from Bybit USDT Perpetual (linear)."""
+    """Fetch klines from Bybit USDT Perpetual (linear). Retries on rate limit (10006)."""
     params = {
         "category": "linear",
         "symbol": symbol,
@@ -29,13 +36,29 @@ def fetch_klines(
     if end_ms:
         params["end"] = end_ms
 
-    resp = requests.get(BYBIT_KLINE_URL, params=params, timeout=15)
-    resp.raise_for_status()
-    result = resp.json()
-    if result.get("retCode") != 0:
-        raise RuntimeError(f"Bybit API: {result.get('retMsg', 'Unknown error')}")
+    for attempt in range(max_retries):
+        resp = requests.get(BYBIT_KLINE_URL, params=params, timeout=15)
+        resp.raise_for_status()
+        result = resp.json()
+        ret_code = result.get("retCode")
+        ret_msg = result.get("retMsg", "")
 
-    return result.get("result", {}).get("list", [])
+        if ret_code == 0:
+            return result.get("result", {}).get("list", [])
+
+        if ret_code == BYBIT_RATE_LIMIT_CODE or "rate limit" in ret_msg.lower() or "too many" in ret_msg.lower():
+            wait = BYBIT_RATE_LIMIT_WAIT
+            reset_ts = resp.headers.get("X-Bapi-Limit-Reset-Timestamp")
+            if reset_ts:
+                try:
+                    wait = max(5, int(reset_ts) - int(time.time()))
+                except (ValueError, TypeError):
+                    pass
+            if attempt < max_retries - 1:
+                logger.warning("Bybit rate limit, waiting %ds before retry (%d/%d)", wait, attempt + 1, max_retries)
+                time.sleep(wait)
+                continue
+        raise RuntimeError(f"Bybit API: {ret_msg or 'Unknown error'}")
 
 
 def fetch_klines_dataframe(
