@@ -109,6 +109,10 @@ class EMAPullbackStrategy:
         if df.empty or len(df) < max(self.ema_period, 50):
             return None
 
+        # Only one position at a time: no new trade until current one is closed (SL/TP)
+        if current_position and current_position != "none":
+            return None
+
         df = self._compute_indicators(df)
         row = df.iloc[-1]
         prev = df.iloc[-2] if len(df) >= 2 else row
