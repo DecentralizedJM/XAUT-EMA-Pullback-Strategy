@@ -178,7 +178,7 @@ def run(config: Config, paper: bool = False) -> None:
 
             # Evaluate strategy
             signal = strategy.evaluate(df, equity=equity, current_position=position)
-
+            last_close = float(df["close"].iloc[-1]) if not df.empty else 0
             if signal:
                 qty, lev = compute_position_and_leverage(
                     signal,
@@ -225,6 +225,13 @@ def run(config: Config, paper: bool = False) -> None:
                                 logger.error("Order failed: %s", result)
                         except MudrexAPIError as e:
                             logger.error("Order error: %s", e)
+            else:
+                logger.info(
+                    "No signal | close=%.2f position=%s next in %ds",
+                    last_close,
+                    position or "flat",
+                    poll_interval,
+                )
 
             time.sleep(poll_interval)
 
