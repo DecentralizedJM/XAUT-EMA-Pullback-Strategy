@@ -133,9 +133,13 @@ def run(config: Config, paper: bool = False) -> None:
 
     if not paper:
         try:
+            # Pre-resolve asset_id once (avoids list_all in loop); respects 2 req/s
+            client._resolve_asset(symbol)
+            time.sleep(1)
             lev_to_set = max_leverage if config.mudrex.auto_leverage else leverage
             client.set_leverage(symbol, lev_to_set, config.mudrex.margin_type)
             logger.info("Leverage set to %dx (auto=%s)", lev_to_set, config.mudrex.auto_leverage)
+            time.sleep(2)  # Let rate limit window recover before loop
         except MudrexAPIError as e:
             logger.warning("Leverage set failed (may already be set): %s", e)
 
@@ -156,6 +160,7 @@ def run(config: Config, paper: bool = False) -> None:
                 except Exception as e:
                     logger.warning("Balance fetch failed: %s; using initial_equity", e)
                     equity = initial_equity
+                time.sleep(0.6)  # Stay under Mudrex 2 req/s before next call
 
             # Fetch Bybit klines
             df = fetch_klines_dataframe(symbol, interval="5", limit=200)
@@ -164,7 +169,7 @@ def run(config: Config, paper: bool = False) -> None:
                 time.sleep(poll_interval)
                 continue
 
-            # Current position
+            # Current position (spaced after balance for 2 req/s)
             positions = client.get_open_positions(symbol) if not paper else []
             position = get_current_position(positions, symbol)
 
