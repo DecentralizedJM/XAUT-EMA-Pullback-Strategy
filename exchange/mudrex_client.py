@@ -1,101 +1,82 @@
 """
 Mudrex Futures API client for XAUT EMA Pullback strategy.
-
+Uses mudrex-trading-sdk (https://github.com/DecentralizedJM/mudrex-api-trading-python-sdk).
 API docs: https://docs.trade.mudrex.com/docs/overview
-Rate limit: 2 requests/second
+
+Resolves XAUTUSDT via paginated list_all() and uses asset_id for API calls when needed.
 """
 
 import logging
-import time
 from typing import Any, Optional
 
-import requests
+from mudrex import MudrexClient as _MudrexClient
+from mudrex.exceptions import MudrexAPIError as _MudrexAPIError
+from mudrex.models import OrderRequest, OrderType, TriggerType
 
 logger = logging.getLogger(__name__)
 
-MUDREX_BASE = "https://trade.mudrex.com/fapi/v1"
+
+class MudrexAPIError(Exception):
+    """Raised on Mudrex API errors. Compatible with bot's exception handling."""
+
+    def __init__(self, status_code: int, response: dict):
+        self.status_code = status_code
+        self.response = response
+        errors = response.get("errors", [])
+        msg = errors[0].get("text", str(response)) if errors else str(response)
+        super().__init__(f"Mudrex API error ({status_code}): {msg}")
 
 
-class RateLimiter:
-    """Enforce 2 req/sec for Mudrex API."""
-
-    def __init__(self, min_interval: float = 0.55):
-        self.min_interval = min_interval
-        self._last_call = 0.0
-
-    def wait(self) -> None:
-        elapsed = time.monotonic() - self._last_call
-        if elapsed < self.min_interval:
-            time.sleep(self.min_interval - elapsed)
-        self._last_call = time.monotonic()
+def _wrap_sdk_error(e: Exception) -> MudrexAPIError:
+    """Convert SDK exception to MudrexAPIError."""
+    if isinstance(e, _MudrexAPIError):
+        status = getattr(e, "status_code", 0) or 0
+        resp = getattr(e, "response", None) or {"message": str(e)}
+        if not isinstance(resp, dict):
+            resp = {"message": str(e)}
+        return MudrexAPIError(status, resp)
+    return MudrexAPIError(0, {"message": str(e)})
 
 
 class MudrexClient:
     """
-    Mudrex Futures API client.
-    Uses symbol-first trading (XAUTUSDT) via is_symbol query param.
+    Mudrex Futures API client using the official SDK.
+    Resolves symbol to asset_id via paginated list_all() for XAUTUSDT.
     """
 
     def __init__(self, api_secret: str):
-        self.api_secret = api_secret
-        self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "X-Authentication": api_secret,
-                "Content-Type": "application/json",
-            }
-        )
-        self.rate_limiter = RateLimiter(min_interval=0.55)
+        self._client = _MudrexClient(api_secret=api_secret)
+        self._asset_id_cache: dict[str, str] = {}  # symbol -> asset_id
 
-    def _request(
-        self,
-        method: str,
-        path: str,
-        params: Optional[dict] = None,
-        json: Optional[dict] = None,
-    ) -> dict:
-        self.rate_limiter.wait()
-        url = f"{MUDREX_BASE}{path}"
+    def _resolve_asset(self, symbol: str) -> Optional[str]:
+        """
+        Resolve symbol to asset_id via paginated list_all().
+        XAUTUSDT may require asset_id for some endpoints.
+        """
+        if symbol in self._asset_id_cache:
+            return self._asset_id_cache[symbol]
         try:
-            resp = self.session.request(
-                method, url, params=params, json=json, timeout=15
-            )
-            data = resp.json() if resp.content else {}
-            if not resp.ok:
-                logger.error("Mudrex API error: %s %s", resp.status_code, data)
-                raise MudrexAPIError(resp.status_code, data)
-            return data
-        except requests.RequestException as e:
-            logger.exception("Mudrex request failed: %s", e)
-            raise
+            assets = self._client.assets.list_all(refresh=True)
+            sym_upper = symbol.upper()
+            for a in assets:
+                if (getattr(a, "symbol", "") or "").upper() == sym_upper:
+                    aid = getattr(a, "asset_id", None) or getattr(a, "id", None)
+                    if aid:
+                        self._asset_id_cache[symbol] = str(aid)
+                        logger.debug("Resolved %s -> asset_id=%s", symbol, aid)
+                        return str(aid)
+        except Exception as e:
+            logger.warning("Asset resolve failed for %s: %s", symbol, e)
+        return None
 
     def get_futures_balance(self) -> float:
-        """
-        Get USDT balance in futures wallet.
-        Tries common Mudrex endpoint patterns.
-        """
-        for path in ["/wallet/futures", "/futures/balance", "/futures/funds"]:
-            try:
-                data = self._request("GET", path)
-                if data.get("success"):
-                    balance_data = data.get("data", {})
-                    if isinstance(balance_data, dict):
-                        val = balance_data.get("available_balance") or balance_data.get("balance") or balance_data.get("availableBalance") or 0
-                        return float(val)
-                    if isinstance(balance_data, (int, float)):
-                        return float(balance_data)
-            except MudrexAPIError:
-                continue
-        logger.warning("Could not fetch futures balance; use config.initial_equity")
-        return 0.0
-
-    def get_leverage(self, symbol: str) -> dict:
-        """Get current leverage for symbol."""
-        return self._request(
-            "GET",
-            f"/futures/{symbol}/leverage",
-            params={"is_symbol": ""},
-        )
+        """Get USDT balance in futures wallet."""
+        try:
+            balance = self._client.wallet.get_futures_balance()
+            val = float(getattr(balance, "balance", 0) or getattr(balance, "available", 0) or 0)
+            return val
+        except Exception as e:
+            raise _wrap_sdk_error(e)
 
     def set_leverage(
         self,
@@ -103,13 +84,24 @@ class MudrexClient:
         leverage: int,
         margin_type: str = "ISOLATED",
     ) -> dict:
-        """Set leverage for symbol."""
-        return self._request(
-            "POST",
-            f"/futures/{symbol}/leverage",
-            params={"is_symbol": ""},
-            json={"leverage": leverage, "margin_type": margin_type},
-        )
+        """Set leverage for symbol. Uses asset_id when available (from paginated list)."""
+        try:
+            asset_id = self._resolve_asset(symbol)
+            if asset_id:
+                # Use asset_id (no is_symbol) - required for some assets like XAUTUSDT
+                resp = self._client.post(
+                    f"/futures/{asset_id}/leverage",
+                    {"margin_type": margin_type, "leverage": str(leverage)},
+                )
+                return {"success": True, "data": resp.get("data", resp)}
+            result = self._client.leverage.set(
+                symbol=symbol,
+                leverage=str(leverage),
+                margin_type=margin_type,
+            )
+            return {"success": True, "data": result}
+        except Exception as e:
+            raise _wrap_sdk_error(e)
 
     def place_market_order(
         self,
@@ -125,55 +117,54 @@ class MudrexClient:
         """
         Place market order. order_type: LONG | SHORT
         order_price: current/reference price (required even for MARKET)
+        Uses asset_id when available (from paginated list) for XAUTUSDT.
         """
-        payload = {
-            "leverage": leverage,
-            "quantity": round(quantity, 4),
-            "order_price": round(order_price, 2),
-            "order_type": order_type,
-            "trigger_type": "MARKET",
-            "is_takeprofit": take_profit is not None,
-            "is_stoploss": stop_loss is not None,
-            "reduce_only": reduce_only,
-        }
-        if stop_loss is not None:
-            payload["stoploss_price"] = round(stop_loss, 2)
-        if take_profit is not None:
-            payload["takeprofit_price"] = round(take_profit, 2)
-
-        data = self._request(
-            "POST",
-            f"/futures/{symbol}/order",
-            params={"is_symbol": ""},
-            json=payload,
-        )
-        if data.get("success") and data.get("data"):
+        try:
+            side = OrderType.LONG if str(order_type).upper() == "LONG" else OrderType.SHORT
+            request = OrderRequest(
+                quantity=str(round(quantity, 4)),
+                order_type=side,
+                trigger_type=TriggerType.MARKET,
+                leverage=str(leverage),
+                order_price=str(round(order_price, 2)),
+                is_stoploss=stop_loss is not None,
+                stoploss_price=str(round(stop_loss, 2)) if stop_loss is not None else None,
+                is_takeprofit=take_profit is not None,
+                takeprofit_price=str(round(take_profit, 2)) if take_profit is not None else None,
+                reduce_only=reduce_only,
+            )
+            asset_id = self._resolve_asset(symbol)
+            if asset_id:
+                order = self._client.orders.create(asset_id=asset_id, request=request)
+            else:
+                order = self._client.orders.create(symbol=symbol, request=request)
             logger.info(
                 "Order placed: %s %s qty=%s order_id=%s",
                 order_type,
                 symbol,
                 quantity,
-                data["data"].get("order_id"),
+                getattr(order, "order_id", order),
             )
-        return data
+            return {"success": True, "data": order}
+        except Exception as e:
+            raise _wrap_sdk_error(e)
 
     def get_open_positions(self, symbol: Optional[str] = None) -> list:
         """Get open positions, optionally filtered by symbol."""
-        for path in ["/positions", "/futures/positions", "/positions/open"]:
-            try:
-                params = {"symbol": symbol} if symbol else None
-                data = self._request("GET", path, params=params)
-                if data.get("success"):
-                    return data.get("data", []) or []
-            except MudrexAPIError:
-                continue
-        return []
-
-
-class MudrexAPIError(Exception):
-    def __init__(self, status_code: int, response: dict):
-        self.status_code = status_code
-        self.response = response
-        errors = response.get("errors", [])
-        msg = errors[0].get("text", str(response)) if errors else str(response)
-        super().__init__(f"Mudrex API error ({status_code}): {msg}")
+        try:
+            positions = self._client.positions.list_open()
+            # Convert to dict format expected by get_current_position
+            out = []
+            for p in positions:
+                pos_symbol = getattr(p, "symbol", None) or getattr(p, "asset_id", "")
+                if symbol and symbol.upper() not in (pos_symbol or "").upper():
+                    continue
+                out.append({
+                    "symbol": pos_symbol,
+                    "asset_id": getattr(p, "asset_id", pos_symbol),
+                    "side": getattr(getattr(p, "side", None), "value", "") or getattr(p, "order_type", ""),
+                    "order_type": getattr(getattr(p, "side", None), "value", "") or getattr(p, "order_type", ""),
+                })
+            return out
+        except Exception as e:
+            raise _wrap_sdk_error(e)

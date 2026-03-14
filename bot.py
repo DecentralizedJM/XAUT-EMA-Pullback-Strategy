@@ -123,15 +123,17 @@ def run(config: Config, paper: bool = False) -> None:
     leverage = config.mudrex.leverage
     qty_step = config.mudrex.quantity_step
     initial_equity = config.mudrex.initial_equity
+    min_order_value = config.mudrex.min_order_value
+    max_leverage = config.mudrex.max_leverage
 
     logger.info(
-        "XAUT EMA Pullback | Symbol=%s | Leverage=%dx | Data=Bybit | Mode=%s",
-        symbol, leverage, "PAPER" if paper else "LIVE",
+        "XAUT EMA Pullback | Symbol=%s | MaxLev=%dx | MinOrder=$%.0f | Data=Bybit | Mode=%s",
+        symbol, max_leverage, min_order_value, "PAPER" if paper else "LIVE",
     )
 
     if not paper:
         try:
-            lev_to_set = config.mudrex.max_leverage if config.mudrex.auto_leverage else leverage
+            lev_to_set = max_leverage if config.mudrex.auto_leverage else leverage
             client.set_leverage(symbol, lev_to_set, config.mudrex.margin_type)
             logger.info("Leverage set to %dx (auto=%s)", lev_to_set, config.mudrex.auto_leverage)
         except MudrexAPIError as e:
@@ -170,15 +172,22 @@ def run(config: Config, paper: bool = False) -> None:
             signal = strategy.evaluate(df, equity=equity, current_position=position)
 
             if signal:
-                qty = round_quantity(signal.position_size, qty_step)
+                qty, lev = compute_position_and_leverage(
+                    signal,
+                    equity,
+                    qty_step,
+                    min_order_value,
+                    max_leverage,
+                    config.strategy.risk_per_trade_pct,
+                )
                 if qty < qty_step:
                     logger.warning("Position size %.6f below min step, skipping", qty)
                 else:
                     order_type = "LONG" if signal.signal == Signal.LONG else "SHORT"
                     if paper:
                         logger.info(
-                            "[PAPER] SIGNAL: %s qty=%.4f entry=%.2f sl=%.2f tp=%.2f",
-                            order_type, qty, signal.entry_price, signal.stop_loss, signal.take_profit,
+                            "[PAPER] SIGNAL: %s qty=%.4f lev=%dx entry=%.2f sl=%.2f tp=%.2f",
+                            order_type, qty, lev, signal.entry_price, signal.stop_loss, signal.take_profit,
                         )
                     else:
                         try:
@@ -186,7 +195,7 @@ def run(config: Config, paper: bool = False) -> None:
                                 symbol=symbol,
                                 order_type=order_type,
                                 quantity=qty,
-                                leverage=leverage,
+                                leverage=lev,
                                 order_price=signal.entry_price,
                                 stop_loss=signal.stop_loss,
                                 take_profit=signal.take_profit,
@@ -194,9 +203,10 @@ def run(config: Config, paper: bool = False) -> None:
                             )
                             if result.get("success"):
                                 logger.info(
-                                    "ORDER: %s qty=%.4f entry=%.2f sl=%.2f tp=%.2f",
+                                    "ORDER: %s qty=%.4f lev=%dx entry=%.2f sl=%.2f tp=%.2f",
                                     order_type,
                                     qty,
+                                    lev,
                                     signal.entry_price,
                                     signal.stop_loss,
                                     signal.take_profit,
