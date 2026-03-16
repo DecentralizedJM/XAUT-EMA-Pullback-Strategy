@@ -125,7 +125,7 @@ class InstitutionalMLStrategy:
         df['lunar_sin'] = np.sin(2 * np.pi * lunar_pct / 100)
         
         # ── 1H Indicators
-        h1 = df[['open','high','low','close','volume']].resample('1H').agg(
+        h1 = df[['open','high','low','close','volume']].resample('1h').agg(
             {'open':'first','high':'max','low':'min','close':'last','volume':'sum'}).dropna()
         h1['ema21'] = ema_c(h1['close'], 21)
         h1['ema200'] = ema_c(h1['close'], 200)
@@ -139,7 +139,7 @@ class InstitutionalMLStrategy:
             df[f'h1_{col}'] = h1_s[col].reindex(df.index, method='ffill')
             
         # ── Daily EMA200
-        d1 = df[['open','high','low','close','volume']].resample('1D').agg(
+        d1 = df[['open','high','low','close','volume']].resample('1d').agg(
             {'open':'first','high':'max','low':'min','close':'last','volume':'sum'}).dropna()
         d1['ema200'] = ema_c(d1['close'], 200)
         df['d1_ema200'] = d1[['ema200']].shift(1)['ema200'].reindex(df.index, method='ffill')
