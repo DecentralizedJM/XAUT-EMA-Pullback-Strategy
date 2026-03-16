@@ -5,5 +5,5 @@ python-dotenv>=1.0.0
 # Mudrex SDK for asset discovery (scripts/find_xaut_asset.py)
 mudrex-trading-sdk @ git+https://github.com/DecentralizedJM/mudrex-api-trading-python-sdk.git
 ephem>=4.1.4
-scikit-learn>=1.2.2
+scikit-learn==1.6.1
 joblib>=1.2.0
