@@ -26,8 +26,8 @@ The bot executes a trade only when all conditions align:
 ### Advanced Quant Filters
 8. **Lunar Cycle** — Avoids trading near Full Moon phases (quant-verified edge).
 9. **Inverse Volatility Sizing** — Position size is dynamically reduced during high-volatility spikes.
-10. **Institutional ML** — A Random Forest model evaluates 32 institutional features; trade is skipped if P(win) < 0.35.
-11. **Walk-Forward Validation** — Model integrity is ensured across shifting market regimes (2021–2026).
+10. **Institutional ML** — A Random Forest model evaluates 32 institutional features; trade is skipped if P(win) < 0.50.
+11. **Walk-Forward Validation** — Model integrity is ensured across shifting market regimes (retrained for 2025-2026 conditions).
 
 ---
 
@@ -35,35 +35,35 @@ The bot executes a trade only when all conditions align:
 
 ```mermaid
 flowchart TB
-    subgraph External ["External Services"]
+    subgraph External [External Services]
         direction LR
-        Bybit["Bybit API"]
-        Mudrex["Mudrex API"]
+        Bybit[Bybit API]
+        Mudrex[Mudrex API]
     end
 
-    subgraph Bot ["XAUT ML Pullback Suite"]
+    subgraph Bot [XAUT ML Pullback Suite]
         direction TB
-        subgraph DataLayer ["Data Layer"]
-            BybitKlines["Bybit Klines OHLCV"]
+        subgraph DataLayer [Data Layer]
+            BybitKlines[Bybit Klines OHLCV]
         end
 
-        subgraph StrategyLayer ["Strategy Layer"]
-            ML_Data["Feature Engineering"]
-            ML_Model["Random Forest Model"]
-            InstitutionalFilters["11-Filter Stack"]
+        subgraph StrategyLayer [Strategy Layer]
+            ML_Data[Feature Engineering]
+            ML_Model[Random Forest Model]
+            InstitutionalFilters[11-Filter Stack]
         end
 
-        subgraph ExchangeLayer ["Exchange Layer"]
-            MudrexClient["Mudrex Client"]
+        subgraph ExchangeLayer [Exchange Layer]
+            MudrexClient[Mudrex Client]
         end
     end
 
-    Bybit --> |"OHLCV 5m / 1H / D"| DataLayer
-    DataLayer --> |"DataFrame"| StrategyLayer
+    Bybit --> |OHLCV 5m / 1H / D| DataLayer
+    DataLayer --> |DataFrame| StrategyLayer
     ML_Data --> ML_Model
-    ML_Model --> |"P(Win) above 0.35"| InstitutionalFilters
-    InstitutionalFilters --> |"Trade Signal"| MudrexClient
-    MudrexClient --> |"Orders"| Mudrex
+    ML_Model --> |P_Win above 0.50| InstitutionalFilters
+    InstitutionalFilters --> |Trade Signal| MudrexClient
+    MudrexClient --> |Orders| Mudrex
 ```
 
 ---
@@ -72,27 +72,27 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    subgraph Step1 ["1. Fetch"]
-        A["Bybit REST"] --> |"GET /v5/market/kline"| B["Multi-TF OHLCV"]
+    subgraph Step1 [1. Fetch]
+        A[Bybit REST] --> |GET /v5/market/kline| B[Multi-TF OHLCV]
     end
 
-    subgraph Step2 ["2. Feature Engineering"]
-        B --> C["Compute EMA / RSI / MACD / ADX"]
-        C --> D["Compute Lunar Phase and Session"]
-        D --> E["Check Tap Zone"]
+    subgraph Step2 [2. Feature Engineering]
+        B --> C[Compute EMA / RSI / MACD / ADX]
+        C --> D[Compute Lunar Phase and Session]
+        D --> E[Check Tap Zone]
     end
 
-    subgraph Step3 ["3. ML and Filter Gate"]
-        E --> F{"10 Filters align?"}
-        F --> |"Yes"| ML["ML Model Evaluation"]
-        F --> |"No"| H["Wait"]
-        ML --> G{"P(win) above 0.35?"}
-        G --> |"Yes"| I["Entry + Dynamic SL + TP"]
-        G --> |"No"| H
+    subgraph Step3 [3. ML and Filter Gate]
+        E --> F{10 Filters align?}
+        F --> |Yes| ML[ML Model Evaluation]
+        F --> |No| H[Wait]
+        ML --> G{P_win above 0.50?}
+        G --> |Yes| I[Entry + Dynamic SL + TP]
+        G --> |No| H
     end
 
-    subgraph Step4 ["4. Execute"]
-        I --> J["Mudrex API"]
+    subgraph Step4 [4. Execute]
+        I --> J[Mudrex API]
     end
 ```
 
@@ -102,26 +102,26 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    Start["New Bar"] --> FetchOHLCV["Fetch Multi-TF Bybit Klines"]
-    FetchOHLCV --> ComputeIndicators["Compute Indicators + Features + Macro"]
+    Start[New Bar] --> FetchOHLCV[Fetch Multi-TF Bybit Klines]
+    FetchOHLCV --> ComputeIndicators[Compute Indicators + Features + Macro]
 
-    ComputeIndicators --> MacroCheck{"Daily / 1H Trend Aligned?"}
-    MacroCheck --> |"Yes"| PullbackCheck{"Price in 5m Tap Zone?"}
-    MacroCheck --> |"No"| NoSignal["No Signal"]
+    ComputeIndicators --> MacroCheck{Daily / 1H Trend Aligned?}
+    MacroCheck --> |Yes| PullbackCheck{Price in 5m Tap Zone?}
+    MacroCheck --> |No| NoSignal[No Signal]
 
-    PullbackCheck --> |"Yes"| SessionCheck{"Valid Trading Session?"}
-    PullbackCheck --> |"No"| NoSignal
+    PullbackCheck --> |Yes| SessionCheck{Valid Trading Session?}
+    PullbackCheck --> |No| NoSignal
 
-    SessionCheck --> |"Yes"| FilterStack{"Other Filters Pass?"}
-    SessionCheck --> |"No"| NoSignal
+    SessionCheck --> |Yes| FilterStack{Other Filters Pass?}
+    SessionCheck --> |No| NoSignal
 
-    FilterStack --> |"Yes"| MLGate{"ML Probability above 35%?"}
-    FilterStack --> |"No"| NoSignal
+    FilterStack --> |Yes| MLGate{ML Probability above 50%?}
+    FilterStack --> |No| NoSignal
 
-    MLGate --> |"Yes"| PositionSizing["Calculate Inverse Volatility QTY"]
-    MLGate --> |"No"| NoSignal
+    MLGate --> |Yes| PositionSizing[Calculate Inverse Volatility QTY]
+    MLGate --> |No| NoSignal
 
-    PositionSizing --> PlaceOrder["Place Order via Mudrex"]
+    PositionSizing --> PlaceOrder[Place Order via Mudrex]
 ```
 
 ---
@@ -130,26 +130,26 @@ flowchart TD
 
 ```mermaid
 flowchart TB
-    subgraph Scanners ["Scanners and Validation"]
-        LiveScan["live_scanner.py"]
-        SanityCheck["sanity_check.py"]
-        ModelTrainer["model_trainer.py"]
+    subgraph Scanners [Scanners and Validation]
+        LiveScan[live_scanner.py]
+        SanityCheck[sanity_check.py]
+        ModelTrainer[model_trainer.py]
     end
 
-    subgraph BotRunner ["bot_institutional.py"]
-        MainLoop["Main Loop"]
-        GetPosition["get_current_position"]
+    subgraph BotRunner [bot_institutional.py]
+        MainLoop[Main Loop]
+        GetPosition[get_current_position]
     end
 
-    subgraph Strategy ["strategy/institutional_ml.py"]
-        MLStrategy["MLInstitutionalStrategy"]
-        Evaluate["evaluate"]
-        Predict["predict_win_prob"]
+    subgraph Strategy [strategy/institutional_ml.py]
+        MLStrategy[MLInstitutionalStrategy]
+        Evaluate[evaluate]
+        Predict[predict_win_prob]
     end
 
-    subgraph Exchange ["exchange/mudrex_client.py"]
-        MudrexClient["MudrexClient"]
-        PlaceOrder["place_market_order"]
+    subgraph Exchange [exchange/mudrex_client.py]
+        MudrexClient[MudrexClient]
+        PlaceOrder[place_market_order]
     end
 
     MainLoop --> Evaluate
@@ -184,8 +184,9 @@ cp .env.example .env
 |---|---|
 | `python3 bot_institutional.py` | Live trading |
 | `python3 bot_institutional.py --paper` | Paper trading |
+| `python3 backtest_3m.py` | Run local 3-month backtest |
 | `python3 live_scanner.py --once` | Single scan |
-| `python3 model_trainer.py` | Retrain ML model |
+| `python3 model_trainer_api.py` | Retrain ML model (via Bybit API) |
 | `python3 sanity_check.py` | Deep diagnostics |
 
 ---
@@ -200,14 +201,18 @@ cp .env.example .env
 
 ---
 
-## Backtest Statistics
+## Backtest Statistics (Recent 3-Month Window)
 
 | Metric | Value |
 |---|---|
-| Net Profit (5-Year OOS) | +115.4% |
-| Max Drawdown | 11.4% |
-| Sharpe Ratio | 1.21 |
-| Average Trades/Week | ~7.6 |
+| **Period** | Dec 2025 – Mar 2026 |
+| **Net Profit** | +26.68% |
+| **Max Drawdown** | -2.67% |
+| **Sharpe Ratio** | 11.51 |
+| **Win Rate**| 55.3% |
+| **Profit Factor** | 2.25 |
+| **ML Filter Rate** | Rejected 68% of candidates |
+| **Trades Extracted** | 38 |
 
 ---
 
