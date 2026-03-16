@@ -1,7 +1,23 @@
-.env
-.venv
-venv/
+# Python
 __pycache__/
 *.py[cod]
-.idea/
-.vscode/
+*$py.class
+*.so
+.venv/
+env/
+venv/
+ENV/
+
+# Trade Logs (Backtests)
+*.csv
+!paxg_daily.csv
+!paxg_monthly.csv
+!paxg_sessions.csv
+# We keep raw input data
+!data/*.csv
+
+# Project specific
+paper_trades.json
+*.log
+.DS_Store
+.env
