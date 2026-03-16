@@ -185,7 +185,7 @@ scaler=StandardScaler()
 X_scaled=scaler.fit_transform(X)
 
 model=RandomForestClassifier(
-    n_estimators=600, max_depth=6, min_samples_leaf=15,
+    n_estimators=800, max_depth=8, min_samples_leaf=25,
     max_features='sqrt', class_weight='balanced',
     random_state=42, n_jobs=-1)
 model.fit(X_scaled, y)
@@ -196,7 +196,7 @@ joblib.dump(scaler, 'saved_model/scaler.joblib')
 joblib.dump({'feature_cols':FEATURE_COLS,
              'rr':RR,'atr_sl':ATR_SL,
              'full_moon_threshold':FULL_MOON_THRESHOLD,
-             'ml_threshold':0.35,
+             'ml_threshold':0.50,
              'trained_on':'2021-03-01 to 2026-03-15',
              'n_samples':len(ML_df)},
             'saved_model/model_config.joblib')
