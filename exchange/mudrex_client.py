@@ -17,8 +17,8 @@ RETRY_STATUSES = (502, 503, 504)
 RETRY_WAIT = 5
 RETRY_ATTEMPTS = 2
 
-from mudrex import TradeClient as _MudrexClient
-from mudrex import MudrexAPIError as _MudrexAPIError
+from mudrex import MudrexClient as _MudrexClient
+from mudrex.exceptions import MudrexAPIError as _MudrexAPIError
 from mudrex.models import OrderRequest, OrderType, TriggerType
 
 logger = logging.getLogger(__name__)
