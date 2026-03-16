@@ -13,5 +13,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Bot runs as long-lived worker
-CMD ["python", "bot.py"]
+# Bot runs as long-lived worker (institutional ML strategy)
+CMD ["python", "bot_institutional.py"]

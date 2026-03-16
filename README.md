@@ -209,10 +209,9 @@ cp .env.example .env
 ## Deploy to Railway
 
 1. Push to GitHub: [DecentralizedJM/XAUT-EMA-Pullback-Strategy](https://github.com/DecentralizedJM/XAUT-EMA-Pullback-Strategy)
-2. Create a Railway project and deploy from GitHub.
-3. Add `MUDREX_API_SECRET` in the Railway dashboard environment settings.
-4. Confirm `Procfile` points to `python3 bot_institutional.py`.
-5. Deploy — Railway runs the bot 24/7.
+2. Create a Railway project and deploy from GitHub (uses `Dockerfile`; `railway.toml` sets start command).
+3. Add `MUDREX_API_SECRET` in the Railway dashboard environment settings. Optionally set `MARGIN_PERCENT` and `LEVERAGE`.
+4. Deploy — Railway runs `python bot_institutional.py` 24/7 via Mudrex SDK.
 
 ---
 
