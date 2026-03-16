@@ -44,32 +44,34 @@ def compute_position_params(
     equity: float,
     qty_step: float,
     min_order_value: float,
-    max_leverage: int,
+    margin_percent: float,
+    leverage: int,
 ) -> tuple[float, int]:
     """
-    Autoscale position size and leverage. 
-    Uses signal.risk_pct which is dynamically calculated (F#3).
+    Computes position size based on user-defined MARGIN_PERCENT and LEVERAGE.
+    Skips the trade if the notional value is under the minimum $8 limit.
     """
     entry = signal.entry_price
-    risk_per_unit = abs(signal.entry_price - signal.stop_loss)
-    if risk_per_unit <= 0: return 0.0, 1
-
-    risk_amount = equity * (signal.risk_pct / 100)
-    qty = risk_amount / risk_per_unit
-    notional = qty * entry
-
+    margin_used = equity * (margin_percent / 100.0)
+    notional = margin_used * leverage
+    
     if notional < min_order_value:
-        qty = min_order_value / entry
-        notional = qty * entry
+        logger.warning(
+            "Skip %s: Notional value ($%.2f) < min_order_value ($%.2f) with %.1f%% margin",
+            signal.signal.value.upper(), notional, min_order_value, margin_percent
+        )
+        return 0.0, leverage
 
+    qty = notional / entry
     qty = round_quantity(qty, qty_step)
-    if qty <= 0: return 0.0, 1
+    
+    if qty * entry < min_order_value:
+        logger.warning(
+            "Skip %s: Rounded notional ($%.2f) < min_order_value ($%.2f)",
+            signal.signal.value.upper(), qty * entry, min_order_value
+        )
+        return 0.0, leverage
 
-    notional = qty * entry
-    if equity <= 0: return qty, 1
-
-    min_lev = notional / equity
-    leverage = max(1, min(max_leverage, math.ceil(min_lev)))
     return qty, leverage
 
 def get_current_position(positions: list, symbol: str) -> Optional[str]:
@@ -90,11 +92,22 @@ def run(config: Config, paper: bool = False) -> None:
     client = MudrexClient(api_secret) if not paper else None
     strategy = InstitutionalMLStrategy(model_dir="saved_model")
 
+    try:
+        config.mudrex.margin_percent = float(os.getenv("MARGIN_PERCENT", config.mudrex.margin_percent))
+    except ValueError:
+        pass
+        
+    try:
+        config.mudrex.leverage = int(os.getenv("LEVERAGE", config.mudrex.leverage))
+    except ValueError:
+        pass
+
     symbol = config.strategy.symbol
     qty_step = config.mudrex.quantity_step
     initial_equity = config.mudrex.initial_equity
     min_order_value = config.mudrex.min_order_value
-    max_leverage = config.mudrex.max_leverage
+    margin_percent = config.mudrex.margin_percent
+    leverage = config.mudrex.leverage
 
     MUDREX_SPACING = 0.6
     POLL_INTERVAL = 90
@@ -103,13 +116,14 @@ def run(config: Config, paper: bool = False) -> None:
         "INSTITUTIONAL BOT | Symbol=%s | Mode=%s | ML Threshold=%.2f",
         symbol, "PAPER" if paper else "LIVE", strategy.cfg.get('ml_threshold', 0.35)
     )
+    logger.info("Config: %.1f%% Margin, %dx Leverage. Min Notional: $%.2f", 
+                margin_percent, leverage, min_order_value)
 
     if not paper:
         try:
             client._resolve_asset(symbol)
             time.sleep(1)
-            # We don't set leverage globally because we auto-scale per trade
-            logger.info("Bot ready. Auto-scaling leverage per trade based on dynamic risk (F#3).")
+            logger.info("Bot ready. Monitoring market for signals.")
         except Exception as e:
             logger.warning("Setup warning: %s", e)
 
@@ -145,8 +159,13 @@ def run(config: Config, paper: bool = False) -> None:
                 signal = strategy.evaluate(df)
                 if signal:
                     qty, lev = compute_position_params(
-                        signal, equity, qty_step, min_order_value, max_leverage
+                        signal, equity, qty_step, min_order_value, margin_percent, leverage
                     )
+                    
+                    if qty <= 0:
+                        logger.debug("Position size 0 (likely minimum order not met). Skipping trade.")
+                        time.sleep(POLL_INTERVAL)
+                        continue
                     
                     order_type = "LONG" if signal.signal == Signal.LONG else "SHORT"
                     if paper:

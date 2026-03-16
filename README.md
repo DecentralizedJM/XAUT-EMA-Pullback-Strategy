@@ -164,9 +164,24 @@ flowchart TB
 
 ## Deployment
 
-### Credentials
+### Configuration Variables
 
-Set `MUDREX_API_SECRET` in your `.env` or Railway environment variables.
+You can customize the bot's risk parameters by setting the following in your `.env` or Railway environment variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `MUDREX_API_SECRET` | (None) | Your Mudrex API Secret for live trade execution. (Required) |
+| `MARGIN_PERCENT` | 5.0 | The % of your Mudrex Futures balance allocated as isolated margin for each trade. If your balance is $1000 and this is `5.0`, $50 will be used as margin per trade. |
+| `LEVERAGE` | 10 | The leverage multiplier applied to your isolated margin. |
+
+#### Actionable Leverage Details
+Your total position size (Notional Value) is computed as: `Notional = (Futures Balance * MARGIN_PERCENT / 100) * LEVERAGE`.
+*Note: Mudrex requires a minimum notional size of $8 for XAUTUSDT. If your calculated notional order value falls below $8, the bot will gracefully skip the trade and wait for the next signal without throwing an error.*
+
+**Recommended Settings:**
+- **Good (Safe/Steady):** `5x - 10x` (with `MARGIN_PERCENT=2.0 - 5.0`) – Keeps liquidation bands relatively wide, absorbing XAUT tracking error while compounding consistently.
+- **Moderate (Standard):** `15x - 20x` (with `MARGIN_PERCENT=1.0 - 3.0`) – Good for smaller accounts looking for aggressive compounding, keeping the capital at risk tightly bound.
+- **Bad (High Risk):** `25x+` – XAUT is a gold-pegged asset. Extremely high leverage amplifies micro-fluctuations and slippage, dramatically increasing liquidation probability even on tight EMA pullback entries. 
 
 ### Installation
 
