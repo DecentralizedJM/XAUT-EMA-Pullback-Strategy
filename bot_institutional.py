@@ -110,7 +110,7 @@ def run(config: Config, paper: bool = False) -> None:
     leverage = config.mudrex.leverage
 
     MUDREX_SPACING = 0.6
-    POLL_INTERVAL = 90
+    POLL_INTERVAL = 120
 
     logger.info(
         "INSTITUTIONAL BOT | Symbol=%s | Mode=%s | ML Threshold=%.2f",
@@ -140,7 +140,8 @@ def run(config: Config, paper: bool = False) -> None:
                     equity = initial_equity
                 time.sleep(MUDREX_SPACING)
 
-            # Fetch Bybit data
+            # Fetch Bybit data (2s delay to avoid rate limit bursts)
+            time.sleep(2)
             df = fetch_klines_dataframe(symbol, interval="5", limit=600)
             if len(df) < 300:
                 logger.warning("Insufficient data: %d bars", len(df))
