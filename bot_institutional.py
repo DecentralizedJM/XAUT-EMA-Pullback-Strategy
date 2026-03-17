@@ -74,6 +74,44 @@ def compute_position_params(
 
     return qty, leverage
 
+def _log_signal_heartbeat(diag: dict) -> None:
+    """Log signal check heartbeat with evaluation details."""
+    reason = diag.get("reason", "unknown")
+    if reason == "insufficient_data":
+        logger.info(
+            "[HEARTBEAT] Signal check | bars=%d | reason=%s",
+            diag.get("bars", 0), reason
+        )
+        return
+    logger.info(
+        "[HEARTBEAT] Signal check | close=%.2f ema21=%.2f rsi=%.1f atr=%.2f | "
+        "score_L=%d score_S=%d | tap_L=%s tap_S=%s | session=%s macro_L=%s macro_S=%s full_moon=%s | "
+        "can_L=%s can_S=%s | reason=%s",
+        diag.get("close", 0),
+        diag.get("ema21", 0),
+        diag.get("rsi", 0),
+        diag.get("atr", 0),
+        diag.get("score_long", 0),
+        diag.get("score_short", 0),
+        diag.get("tap_long", False),
+        diag.get("tap_short", False),
+        diag.get("valid_session", False),
+        diag.get("macro_long", False),
+        diag.get("macro_short", False),
+        diag.get("full_moon_avoid", False),
+        diag.get("can_long", False),
+        diag.get("can_short", False),
+        reason,
+    )
+    if "ml_prob" in diag:
+        logger.info(
+            "[HEARTBEAT] ML | candidate=%s prob=%.3f threshold=%.3f",
+            diag.get("candidate", "-"),
+            diag.get("ml_prob", 0),
+            diag.get("ml_threshold", 0),
+        )
+
+
 def get_current_position(positions: list, symbol: str) -> Optional[str]:
     for p in positions or []:
         pos_symbol = (p.get("symbol") or p.get("asset_id") or "").upper()
@@ -157,7 +195,7 @@ def run(config: Config, paper: bool = False) -> None:
             if position:
                 logger.info("Position already open: %s. Monitoring...", position)
             else:
-                signal = strategy.evaluate(df)
+                signal, diag = strategy.evaluate(df)
                 if signal:
                     qty, lev = compute_position_params(
                         signal, equity, qty_step, min_order_value, margin_percent, leverage
@@ -200,7 +238,7 @@ def run(config: Config, paper: bool = False) -> None:
                         except MudrexAPIError as e:
                             logger.error("API Error: %s", e)
                 else:
-                    logger.debug("No signal detected.")
+                    _log_signal_heartbeat(diag)
 
             time.sleep(POLL_INTERVAL)
 

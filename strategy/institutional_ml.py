@@ -9,7 +9,7 @@ import ephem
 import joblib
 import os
 import logging
-from typing import Optional
+from typing import Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
@@ -74,9 +74,10 @@ class InstitutionalMLStrategy:
         m.compute(dt.strftime("%Y/%m/%d"))
         return m.phase
 
-    def evaluate(self, df5m: pd.DataFrame) -> Optional[TradeSignal]:
+    def evaluate(self, df5m: pd.DataFrame) -> Tuple[Optional[TradeSignal], dict]:
+        """Returns (signal, diagnostics). Diagnostics always populated when len>=200."""
         if len(df5m) < 200:
-            return None
+            return None, {"bars": len(df5m), "reason": "insufficient_data"}
         
         df = df5m.copy()
         # Ensure index is datetime
@@ -175,7 +176,47 @@ class InstitutionalMLStrategy:
         
         can_long = tap_long and score_long >= 5 and valid_session and macro_long and not full_moon_avoid
         can_short = tap_short and score_short >= 5 and valid_session and macro_short and not full_moon_avoid
-        
+
+        diag = {
+            "close": float(d["close"]),
+            "ema21": float(d["ema21"]),
+            "rsi": float(d["rsi"]),
+            "atr": float(d["atr"]),
+            "score_long": score_long,
+            "score_short": score_short,
+            "tap_long": bool(tap_long),
+            "tap_short": bool(tap_short),
+            "valid_session": bool(valid_session),
+            "macro_long": bool(macro_long),
+            "macro_short": bool(macro_short),
+            "full_moon_avoid": bool(full_moon_avoid),
+            "can_long": can_long,
+            "can_short": can_short,
+            "lunar_pct": float(lunar_pct),
+            "hour": int(d["hour"]),
+            "dow": int(d["dow"]),
+            "month": int(d["month"]),
+            "bars": len(df),
+        }
+        if not can_long and not can_short:
+            if not tap_long and not tap_short:
+                diag["reason"] = "no_tap"
+            elif tap_long and score_long < 5:
+                diag["reason"] = "low_score_long"
+            elif tap_short and score_short < 5:
+                diag["reason"] = "low_score_short"
+            elif not valid_session:
+                diag["reason"] = "outside_session"
+            elif tap_long and not macro_long:
+                diag["reason"] = "below_d1_ema200"
+            elif tap_short and not macro_short:
+                diag["reason"] = "above_d1_ema200"
+            elif full_moon_avoid:
+                diag["reason"] = "full_moon_avoid"
+            else:
+                diag["reason"] = "filter_fail"
+            return None, diag
+
         direction = None
         if can_long:
             direction = Signal.LONG
@@ -183,8 +224,6 @@ class InstitutionalMLStrategy:
         elif can_short:
             direction = Signal.SHORT
             score = score_short
-        else:
-            return None
             
         # ── ML Filter
         feat_map = {
@@ -229,10 +268,14 @@ class InstitutionalMLStrategy:
         X = np.array([[feat_map[f] for f in self.cfg['feature_cols']]])
         X_scaled = self.scaler.transform(X)
         ml_prob = self.model.predict_proba(X_scaled)[0, 1]
-        
+        diag["ml_prob"] = float(ml_prob)
+        diag["ml_threshold"] = float(self.cfg["ml_threshold"])
+        diag["candidate"] = direction.value
+
         if ml_prob < self.cfg['ml_threshold']:
             logger.info("Candidate %s rejected by ML: prob=%.3f < %.3f", direction, ml_prob, self.cfg['ml_threshold'])
-            return None
+            diag["reason"] = "ml_reject"
+            return None, diag
             
         # ── Position Sizing (F#3)
         base_risks = {5: 0.008, 6: 0.012, 7: 0.015}
@@ -250,6 +293,7 @@ class InstitutionalMLStrategy:
             sl = d['close'] + self.cfg['atr_sl'] * at
             tp = d['close'] - (sl - d['close']) * self.cfg['rr']
             
+        diag["reason"] = "signal"
         return TradeSignal(
             signal=direction,
             entry_price=round(float(d['close']), 2),
@@ -258,4 +302,4 @@ class InstitutionalMLStrategy:
             probability=float(ml_prob),
             score=score,
             risk_pct=float(risk_pct)
-        )
+        ), diag
